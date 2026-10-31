@@ -204,7 +204,7 @@ Am Telefon oder PC mit dem Hotspot `CONNECT_AP_SSID` verbinden, im Browser
 | **Anderes Netzwerk** | Freitext für versteckte oder gerade nicht sichtbare Netze, hat Vorrang vor der Liste |
 | **Passwort** | leer lassen für ein offenes Netz |
 | **Breite / Länge** | Koordinaten für die Sonnenzeiten, leer = bisheriger Wert bleibt |
-| **Außensensor** | IP-Adresse eines zweiten Geräts, leer = keiner (Feld ist vorbereitet, abgefragt wird es noch nicht) |
+| **Außensensor** | IP, Name oder `host:port` eines zweiten Geräts, leer = keiner (wird alle 60 s abgefragt) |
 
 | Schaltfläche | Ergebnis |
 |---|---|
@@ -229,7 +229,7 @@ im NVS steht, gilt das:
 | `ssid`, `pass` | WLAN-Zugang |
 | `lat`, `lon` | Koordinaten als Text (Dezimalgrad) |
 | `name` | Gerätename, Vorgabe `CONNECT_DEVICE_NAME` = `Raumthermometer` |
-| `remote` | IP oder Name des Außensensors, leer = keiner |
+| `remote` | IP, Name oder `host:port` des Außensensors (ohne `http://`, ohne `/`), leer = keiner |
 | `off` | Temperatur-Offset in Zehntelgrad (Ganzzahl, `-15` = −1,5 °C) |
 | `skip` | 1 = Konfigurationsmodus beim Start nicht automatisch öffnen |
 
@@ -610,11 +610,44 @@ I (17907) outdoor: line "außen 5,8°": cap 24 px, baseline y=180, 164 px wide
 | Punkt | Wert |
 |---|---|
 | Adresse | NVS-Schlüssel `remote`, Feld **Außensensor** der Einrichtungsseite |
-| erlaubt | IP (`192.168.123.191`) **oder** Name (`aussenthermometer.local`) |
+| erlaubt | IP (`192.168.123.191`), Name (`aussenthermometer.local`) oder `host:port` (`nasjoe65.ddns.net:8083`) |
+| **nicht** erlaubt | `http://` davor, `https://` davor, `/` oder ein Pfad dahinter – die Firmware baut selbst `http://<remote>/api/values` |
 | Abfrage | `http://<remote>/api/values`, alle `OUTDOOR_REFRESH_S` (60 s) |
 | Timeout | `OUTDOOR_TIMEOUT_MS`, 5 s - ein stummes Partnergerät blockiert nichts |
 | Feld | `temperature_c`, nur wenn dort `"valid":true` steht |
 | Ablage | Cache mit Zeitstempel, gelesen von der Anzeige-Task (kein Warten auf Netz) |
+
+### Zugriff über DDNS / Portweiterleitung
+
+Der JSON-Endpunkt `/api/values` läuft **auf Port 80**. Der öffentliche
+Seiten-Port 8080 (`WEBSERVER_PUBLIC_PORT`) kennt **absichtlich nur die
+HTML-Seite** – dort antwortet `/api/values` mit `404 Nothing matches the given
+URI`. Eine Weiterleitung von außen muss deshalb auf **internen Port 80** zeigen,
+nicht auf 8080.
+
+Am PC prüfen (Vorher/Nachher der Weiterleitung):
+
+```powershell
+curl.exe -i http://nasjoe65.ddns.net:8083/api/values
+```
+
+* **200 + JSON** (`{"valid":true,"temperature_c":…}`): Port zeigt auf 80 →
+  im Feld `nasjoe65.ddns.net:8083` eintragen (ohne `http://`, ohne `/`).
+* **404 „Nothing matches the given URI"**: Port zeigt auf 8080 → Weiterleitung
+  auf internen Port 80 ändern oder einen anderen Außenport dafür verwenden.
+
+Empfohlen, wenn beide Geräte im selben Heimnetz hängen: die **lokale Adresse**
+des Außengeräts eintragen (z. B. `192.168.123.191` oder
+`aussenthermometer.local`). Das ist schneller, funktioniert ohne Internet und
+setzt den JSON-Endpunkt nicht öffentlich frei. Damit die IP stabil bleibt, im
+Router eine DHCP-Reservierung für das Außengerät anlegen.
+
+Auf diesem Gerät ist genau das bereits eingerichtet und verifiziert:
+`remote = "aussenthermometer.local"`, das JSON von `192.168.123.123` meldet
+`"outdoor_c":8.5`. Voraussetzung dafür ist
+`CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES=y` in der `sdkconfig` – nur dann löst
+`getaddrinfo()` im ESP32 einen `.local`-Namen über mDNS auf. Die Option steht
+deshalb auch in [sdkconfig.defaults](sdkconfig.defaults).
 
 Weil der Wert nur im Cache liegt, zeichnet die Anzeige unabhängig vom Netz weiter;
 die Netzwerk-Task aktualisiert im Hintergrund. Erst wenn `remote` leer ist,
@@ -633,11 +666,12 @@ Alle Werte stehen in [main/layout.h](main/layout.h):
 | `LAYOUT_OUT_TEMP_MIN_SQUEEZE` | stärkste Stauchung | 0.6 |
 
 Die Zeile ist horizontal um `BOARD_SCREEN_WIDTH / 2` (x=120) zentriert. Mit
-Grundlinie 180 und Versalhöhe 24 reicht ihr Tintenbereich von y=156 bis y=180 -
-die **oberen 4 Zeilen liegen noch im ersten Band**. Das ist unkritisch, weil jedes
-Band das ganze Bild malt und nur die Zeilen außerhalb abschneidet; im Log sieht man
-es an den Textpixeln beider Bänder. Nur die Grundlinie genau auf eine Bandgrenze
-(160/320) legen sollte man nicht.
+Grundlinie 180 und Versalhöhe 24 reicht ihr Tintenbereich von y=156 bis y=180.
+Mit dem vollen Framebuffer (`LAYOUT_BAND_HEIGHT = BOARD_SCREEN_HEIGHT`) spielt
+das keine Rolle; nur wenn wieder in Bändern gezeichnet wird (160 Zeilen), liegt
+der obere Teil im ersten und der Rest im zweiten Band – unkritisch, weil jedes
+Band das ganze Bild malt und nur die Zeilen außerhalb abschneidet. Nur die
+Grundlinie genau auf eine Bandgrenze (160/320) legen sollte man nicht.
 
 Das JSON dieser Unit führt den geholten Wert als `outdoor_c` mit (oder `null`,
 solange keiner da ist) - praktisch für eine Wetterstation, die nur die
@@ -1336,8 +1370,8 @@ weiter.
 | `reset: task watchdog` im Log | Eine angemeldete Task hat 60 s nicht gefeedet – Backtrace im Log darüber zeigt, wo sie hing. Nicht die Ursache wegdrücken, sondern die Stelle suchen |
 | Port 8080 antwortet nicht | `WEBSERVER_PUBLIC_PORT` steht auf 0, oder der Port ist im lokalen Netz von einer Firewall gesperrt. `page for outside at http://…:8080/` im Log prüfen |
 | Unit verbindet sich mit dem schwächeren Repeater | Sollte nicht mehr passieren: der stärkste BSSID wird gewählt. Im Log zeigt `scan:` alle Kandidaten, `using the strongest` den gewählten; `bssid` im JSON nennt den tatsächlich benutzten |
-| Keine Außentemperatur auf der Anzeige | Feld **Außensensor** ist leer (Log: `outdoor sensor not set`). Adresse eintragen - IP oder `<name>.local` - und speichern |
-| `no outdoor temperature from …` im Log | Das Partnergerät antwortet nicht: Adresse prüfen (`curl http://<adresse>/api/values` am PC), gleiches Netz vorausgesetzt. Die Zeile bleibt dann weg, die Anzeige läuft weiter |
+| Keine Außentemperatur auf der Anzeige | Feld **Außensensor** ist leer (Log: `outdoor sensor not set`). Adresse eintragen - IP, `<name>.local` oder `host:port` (ohne `http://`, ohne `/`) - und speichern |
+| `no outdoor temperature from …` im Log | Das Partnergerät antwortet nicht: Adresse prüfen (`curl.exe -i http://<adresse>/api/values` am PC). Bei DDNS muss der Außenport auf **intern 80** zeigen; Port 8080 liefert nur die HTML-Seite und dort `404`. Die Zeile bleibt dann weg, die Anzeige läuft weiter |
 | Außentemperatur springt auf `--` bzw. verschwindet | Das Partnergerät meldet `"valid":false` (eigener Sensorfehler) - der Wert wird bewusst nicht übernommen |
 | `<hostname>.local` wird nicht aufgelöst | mDNS fehlt beim Client: unter Windows beide Dienste prüfen (`Dnscache`/`fdPHost`), unter Android erst ab Version 12 vorhanden, manche Firmennetze blockieren Multicast. Im Log steht `discovery: announced as http://….local/`; sonst Router-Hostname oder IP nutzen |
 | `192.168.4.1` zeigt die Messwertseite statt der Einrichtung | War ein Fehler: Messwert- und Einrichtungs-Server lauschten beide auf Port 80. Behoben durch `webserver_stop()` beim Eintritt in den Konfigurationsmodus – im Log muss `readings endpoint stopped` vor `access point` stehen |

@@ -487,20 +487,51 @@ static void url_decode(const char *source, size_t length, char *target, size_t s
     target[out] = '\0';
 }
 
-/* An IPv4 address or a host name: letters, digits, dots and hyphens */
+/* An IPv4 address or a host name, optionally with a port: letters, digits,
+ * dots, hyphens and exactly one ":" followed by 1..65535.  No scheme and no
+ * path - outdoor_fetch() adds "http://" in front and "/api/values" behind. */
 static bool valid_host(const char *text)
 {
     if (text[0] == '\0') {
         return true;
     }
-    for (const char *c = text; *c != '\0'; c++) {
+
+    const char *colon = strchr(text, ':');
+    const char *host_end = colon != NULL ? colon : text + strlen(text);
+    if (host_end == text) {
+        return false;
+    }
+
+    for (const char *c = text; c < host_end; c++) {
         const bool allowed = (*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') ||
                              (*c >= 'A' && *c <= 'Z') || *c == '.' || *c == '-';
         if (!allowed) {
             return false;
         }
     }
-    return true;
+
+    if (colon == NULL) {
+        return true;
+    }
+    if (strchr(colon + 1, ':') != NULL) {
+        return false;
+    }
+
+    const char *digit = colon + 1;
+    if (*digit == '\0') {
+        return false;
+    }
+    long port = 0;
+    for (; *digit != '\0'; digit++) {
+        if (*digit < '0' || *digit > '9') {
+            return false;
+        }
+        port = port * 10 + (*digit - '0');
+        if (port > 65535) {
+            return false;
+        }
+    }
+    return port >= 1;
 }
 
 /* Value of `key` in an application/x-www-form-urlencoded body, already decoded */
@@ -573,8 +604,8 @@ static const char *PAGE_TAIL =
     "<input id=\"lat\" name=\"lat\" inputmode=\"decimal\" value=\"%s\">"
     "<input id=\"lon\" name=\"lon\" inputmode=\"decimal\" value=\"%s\">"
     "</div>"
-    "<label for=\"remote\">Außentemperatursensor: IP-Adresse (optional)</label>"
-    "<input id=\"remote\" name=\"remote\" maxlength=\"63\" placeholder=\"z. B. 192.168.123.50\" "
+    "<label for=\"remote\">Außentemperatursensor: IP-Adresse oder Hostname (optional)</label>"
+    "<input id=\"remote\" name=\"remote\" maxlength=\"63\" placeholder=\"z. B. 192.168.123.50 oder name.ddns.net:8083\" "
     "autocapitalize=\"off\" autocorrect=\"off\" autocomplete=\"off\" value=\"%s\">"
     "<label for=\"offset\">Temperatur-Offset in °C (Kalibrierung)</label>"
     "<input id=\"offset\" name=\"offset\" inputmode=\"decimal\" maxlength=\"6\" "
@@ -776,8 +807,9 @@ static esp_err_t handler_save(httpd_req_t *req)
     if (form_value(body, "remote", raw, sizeof(raw))) {
         if (!valid_host(raw)) {
             return send_message(req, 400, "Adresse des Außensensors ungültig",
-                                "Bitte eine IPv4-Adresse wie 192.168.123.50 eintragen oder das "
-                                "Feld leer lassen.");
+                                "Bitte einen Hostnamen oder eine IPv4-Adresse eintragen, "
+                                "optional mit Port (z. B. name.ddns.net:8083). "
+                                "Kein http:// davor und kein / dahinter.");
         }
         strlcpy(next.remote, raw, sizeof(next.remote));
     }

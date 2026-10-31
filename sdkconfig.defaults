@@ -46,6 +46,10 @@ CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=3
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
 CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF=2
 
+# mDNS over the espressif/mdns component; the resolver part is needed so that
+# getaddrinfo() can resolve "<name>.local" (the outdoor sensor address).
+CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES=y
+
 # HTTPS for the sunrise-sunset request needs the default 16 KB TLS record
 # buffer: the certificate chain of the server arrives as one record and does not
 # fit into a smaller buffer (the handshake fails with a fatal error).
