@@ -1,0 +1,17 @@
+## Managed components, downloaded into managed_components/ on the first build
+dependencies:
+  idf: ">=5.2"
+
+  ## ILI9341 LCD panel driver (esp_lcd), v2.x targets ESP-IDF v6
+  espressif/esp_lcd_ili9341: "^2.1.0"
+
+  ## WS2812 status LED, driven through RMT
+  espressif/led_strip: "^3.1.0"
+
+  ## littlefs for the wallpaper partition ("storage"), also provides the
+  ## littlefs_create_partition_image() CMake helper
+  joltwallet/littlefs: "^1.23.0"
+
+  ## mDNS responder: makes the unit reachable as <hostname>.local, independent
+  ## of the router's DNS (not part of ESP-IDF 6.x any more)
+  espressif/mdns: "^1.14.0"

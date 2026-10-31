@@ -1,0 +1,12 @@
+Open Sans Regular
+=================
+
+File:   OpenSans-Regular.ttf
+Source: https://github.com/googlefonts/opensans (fonts/ttf/OpenSans-Regular.ttf)
+License: Apache License 2.0
+         https://www.apache.org/licenses/LICENSE-2.0
+
+The font is linked into the application image (see EMBED_FILES in
+main/CMakeLists.txt) and read directly from flash by stb_truetype, no copy in
+RAM is made.  To use another font, replace this file and keep the name, or
+adjust EMBED_FILES and the symbol names in main/ttf.c.
